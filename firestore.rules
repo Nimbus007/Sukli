@@ -1,0 +1,125 @@
+rules_version = '2';
+
+// Sukli: every user can only read and write their own data under /users/{uid}.
+// Amounts are integers in centavos (PHP). There is no currency field because
+// the app only supports the Philippine peso.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isShortString(v, maxLen) {
+      return v is string && v.size() > 0 && v.size() <= maxLen;
+    }
+
+    function isCentavos(v) {
+      return v is int && v > 0 && v <= 100000000000;
+    }
+
+    function isDateString(v) {
+      return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function validProfile(d) {
+      return d.keys().hasOnly(['name', 'createdAt', 'updatedAt'])
+        && d.name is string && d.name.size() <= 80
+        && d.createdAt is timestamp;
+    }
+
+    function validAccount(d) {
+      return d.keys().hasOnly(['name', 'type', 'openingBalance', 'order', 'createdAt', 'updatedAt'])
+        && isShortString(d.name, 30)
+        && d.type in ['cash', 'ewallet', 'bank', 'other']
+        && d.openingBalance is int
+        && d.openingBalance >= -100000000000 && d.openingBalance <= 100000000000
+        && d.order is int
+        && d.createdAt is timestamp;
+    }
+
+    function validTransaction(d) {
+      return d.keys().hasOnly(['type', 'amount', 'date', 'categoryId', 'accountId',
+                               'toAccountId', 'note', 'recurringId', 'createdAt', 'updatedAt'])
+        && d.type in ['income', 'expense', 'transfer']
+        && isCentavos(d.amount)
+        && isDateString(d.date)
+        && isShortString(d.accountId, 40)
+        && (d.type == 'transfer'
+              ? ('toAccountId' in d && isShortString(d.toAccountId, 40)
+                  && d.toAccountId != d.accountId && !('categoryId' in d))
+              : ('categoryId' in d && isShortString(d.categoryId, 40)
+                  && !('toAccountId' in d)))
+        && (!('note' in d) || (d.note is string && d.note.size() <= 200))
+        && (!('recurringId' in d) || isShortString(d.recurringId, 40))
+        && d.createdAt is timestamp;
+    }
+
+    function validBudget(d, id) {
+      return d.keys().hasOnly(['categoryId', 'limit', 'updatedAt'])
+        && d.categoryId == id
+        && isCentavos(d.limit);
+    }
+
+    function validGoal(d) {
+      return d.keys().hasOnly(['name', 'target', 'saved', 'deadline', 'log', 'createdAt', 'updatedAt'])
+        && isShortString(d.name, 60)
+        && isCentavos(d.target)
+        && d.saved is int && d.saved >= 0 && d.saved <= 100000000000
+        && (!('deadline' in d) || isDateString(d.deadline))
+        && d.log is list && d.log.size() <= 50
+        && d.createdAt is timestamp;
+    }
+
+    function validRecurring(d) {
+      return d.keys().hasOnly(['title', 'type', 'amount', 'categoryId', 'accountId', 'frequency',
+                               'nextDate', 'anchorDay', 'active', 'createdAt', 'updatedAt'])
+        && isShortString(d.title, 80)
+        && d.type in ['income', 'expense']
+        && isCentavos(d.amount)
+        && isShortString(d.categoryId, 40)
+        && isShortString(d.accountId, 40)
+        && d.frequency in ['weekly', 'biweekly', 'monthly']
+        && isDateString(d.nextDate)
+        && d.anchorDay is int && d.anchorDay >= 1 && d.anchorDay <= 31
+        && d.active is bool
+        && d.createdAt is timestamp;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validProfile(request.resource.data);
+      allow delete: if isOwner(uid);
+
+      match /accounts/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validAccount(request.resource.data);
+      }
+
+      match /transactions/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validTransaction(request.resource.data);
+      }
+
+      match /budgets/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validBudget(request.resource.data, id);
+      }
+
+      match /goals/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validGoal(request.resource.data);
+      }
+
+      match /recurring/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validRecurring(request.resource.data);
+      }
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

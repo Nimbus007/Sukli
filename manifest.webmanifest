@@ -1,0 +1,18 @@
+{
+  "name": "Sukli",
+  "short_name": "Sukli",
+  "description": "Peso budget tracker",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#EEF1F5",
+  "theme_color": "#1B4C97",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "scope": "./"
+}
